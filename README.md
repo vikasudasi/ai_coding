@@ -29,6 +29,7 @@ cp .env.example .env
 # Edit .env with your real values
 
 # 3. Start the full stack in Docker
+#    (App container runs a placeholder CMD until you replace it in the Dockerfile.)
 docker-compose up --build
 
 # 4. Run validation suite
@@ -47,8 +48,9 @@ project-root/
 │   ├── RULES.md          # Strict guardrails and banned practices
 │   ├── ARCHITECTURE.md   # System map, data flow, API contracts
 │   └── MEMORY.md         # Decision log and known quirks
-├── .git-hooks/           # Pre-commit validation scripts
-│   ├── pre-commit        # Checks: secrets, debug artifacts, tests, Docker
+├── .git-hooks/           # Git hook scripts
+│   ├── pre-commit        # Checks: secrets, debug artifacts, tests, Docker, STATE.md
+│   ├── commit-msg        # Validates Conventional Commits format
 │   └── install-hooks.sh  # Symlinks hooks into .git/hooks/
 ├── src/                  # Application source code
 ├── tests/

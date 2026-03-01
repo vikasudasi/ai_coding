@@ -82,27 +82,7 @@ if [ "$DEBUG_FOUND" -eq 0 ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# CHECK 3: Commit message convention (Conventional Commits)
-# ---------------------------------------------------------------------------
-log_info "Checking commit message format..."
-
-COMMIT_MSG_FILE=".git/COMMIT_EDITMSG"
-CONVENTIONAL_PATTERN='^(feat|fix|docs|style|refactor|test|chore|ci|perf|build|revert)(\(.+\))?: .{1,100}$'
-
-if [ -f "$COMMIT_MSG_FILE" ]; then
-  COMMIT_MSG=$(head -1 "$COMMIT_MSG_FILE")
-  if echo "$COMMIT_MSG" | grep -qE "$CONVENTIONAL_PATTERN"; then
-    log_pass "Commit message follows Conventional Commits format"
-  else
-    log_fail "Commit message does not follow Conventional Commits format."
-    echo "       Got:      '$COMMIT_MSG'"
-    echo "       Expected: 'type(scope): description'"
-    echo "       Types:    feat|fix|docs|style|refactor|test|chore|ci|perf|build|revert"
-  fi
-fi
-
-# ---------------------------------------------------------------------------
-# CHECK 4: Run test suite (if test runner is available)
+# CHECK 3: Run test suite (if test runner is available)
 # ---------------------------------------------------------------------------
 log_info "Running test suite..."
 
@@ -129,7 +109,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# CHECK 5: Docker build validation (if Dockerfile present)
+# CHECK 4: Docker build validation (if Dockerfile present)
 # ---------------------------------------------------------------------------
 log_info "Validating Dockerfile syntax..."
 
@@ -149,7 +129,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# CHECK 6: Validate STATE.md is not in IDLE when committing code changes
+# CHECK 5: Validate STATE.md is not in IDLE when committing code changes
 # ---------------------------------------------------------------------------
 log_info "Checking STATE.md consistency..."
 

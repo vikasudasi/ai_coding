@@ -19,7 +19,7 @@ info() { echo -e "${YELLOW}[INFO]${NC} $1"; }
 
 echo ""; echo "=== Project Validation ==="; echo ""
 
-# --- Test suite ---
+# --- Test suite (full tree; pre-commit runs tests/unit/ only) ---
 info "Running tests..."
 if command -v pytest &>/dev/null;           then pytest tests/ -q && ok "pytest" || fail "pytest"; \
 elif command -v npm &>/dev/null && [ -f package.json ]; then npm test --silent && ok "npm test" || fail "npm test"; \

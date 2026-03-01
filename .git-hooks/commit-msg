@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# =============================================================================
+# Commit-Msg Hook — Validate Conventional Commits format
+# =============================================================================
+# Git passes the path to the file containing the commit message as $1.
+# This runs at commit time so we validate the message actually being committed.
+# Install: bash .git-hooks/install-hooks.sh
+# =============================================================================
+
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+COMMIT_MSG_FILE="${1:?}"
+CONVENTIONAL_PATTERN='^(feat|fix|docs|style|refactor|test|chore|ci|perf|build|revert)(\(.+\))?: .{1,100}$'
+
+COMMIT_MSG=$(head -1 "$COMMIT_MSG_FILE")
+if echo "$COMMIT_MSG" | grep -qE "$CONVENTIONAL_PATTERN"; then
+  exit 0
+fi
+
+echo -e "${RED}[FAIL]${NC} Commit message does not follow Conventional Commits format."
+echo "  Got:      '$COMMIT_MSG'"
+echo "  Expected: type(scope): description"
+echo "  Types:    feat|fix|docs|style|refactor|test|chore|ci|perf|build|revert"
+exit 1

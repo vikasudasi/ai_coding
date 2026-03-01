@@ -42,4 +42,18 @@ CI enforces this via the pre-commit hook structure.
 
 ---
 
+## [2025-03-01] Dev-only credentials in docker-compose and .env.example
+
+**Context:** Boilerplate includes a default Postgres password in `docker-compose.yml` and `.env.example` for local development.
+
+**Decision/Discovery:** The values (e.g. `POSTGRES_PASSWORD: apppassword`, `DATABASE_URL=...apppassword@db...`) are intentional for local/dev only. They are not production secrets.
+
+**Alternatives considered:** Omitting defaults — rejected because they make clone-and-run possible. Using Docker secrets only — out of scope for the boilerplate.
+
+**Consequence:** In production, use real secrets (e.g. env from a vault, Docker secrets). Do not commit production `.env` or override files containing real credentials.
+
+**Files affected:** `.ai/MEMORY.md` (this entry)
+
+---
+
 <!-- Add new entries below this line, newest first -->

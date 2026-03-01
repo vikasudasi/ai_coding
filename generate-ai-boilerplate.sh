@@ -359,87 +359,198 @@ hdr "4/7  Writing .git-hooks/..."
 
 cat > .git-hooks/pre-commit << 'HOOK_EOF'
 #!/usr/bin/env bash
+# =============================================================================
 # Pre-Commit Hook — Deterministic Validation Gate
+# =============================================================================
+# Purpose: Prevent agents from committing broken, insecure, or non-compliant code.
 # Install: bash .git-hooks/install-hooks.sh
 # Run manually: bash .git-hooks/pre-commit
+# =============================================================================
 
 set -euo pipefail
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
-PASS="${GREEN}[PASS]${NC}"; FAIL="${RED}[FAIL]${NC}"; WARN="${YELLOW}[WARN]${NC}"
-INFO="${YELLOW}[INFO]${NC}"; ERRORS=0
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+PASS="${GREEN}[PASS]${NC}"
+FAIL="${RED}[FAIL]${NC}"
+WARN="${YELLOW}[WARN]${NC}"
+INFO="${YELLOW}[INFO]${NC}"
+
+ERRORS=0
 
 log_pass() { echo -e "${PASS} $1"; }
 log_fail() { echo -e "${FAIL} $1"; ERRORS=$((ERRORS + 1)); }
 log_warn() { echo -e "${WARN} $1"; }
 log_info() { echo -e "${INFO} $1"; }
 
-echo ""; echo "===== Pre-Commit Validation Gate ====="; echo ""
-
-# CHECK 1: Secrets scan
-log_info "Scanning for hardcoded secrets..."
-SECRET_PATTERNS=('password\s*=\s*["'"'"'][^"'"'"']{4,}' 'api_key\s*=\s*["'"'"'][^"'"'"']{8,}'
-  'secret\s*=\s*["'"'"'][^"'"'"']{8,}' 'AWS_SECRET_ACCESS_KEY' 'BEGIN RSA PRIVATE' 'BEGIN OPENSSH PRIVATE')
-STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)
-SECRET_FOUND=0
-for pat in "${SECRET_PATTERNS[@]}"; do
-  if echo "$STAGED_FILES" | xargs -I{} git show ":{}" 2>/dev/null | grep -qiE "$pat" 2>/dev/null; then
-    log_fail "Potential secret matched: '$pat'"; SECRET_FOUND=1
-  fi
-done
-[ "$SECRET_FOUND" -eq 0 ] && log_pass "No hardcoded secrets detected"
-
-# CHECK 2: Debug artifacts
-log_info "Checking for debug artifacts..."
-DEBUG_PATTERNS=('console\.log\(' 'debugger;' 'binding\.pry' 'import pdb' 'pdb\.set_trace')
-DEBUG_FOUND=0
-for pat in "${DEBUG_PATTERNS[@]}"; do
-  MATCHES=$(echo "$STAGED_FILES" | xargs grep -lE "$pat" 2>/dev/null || true)
-  if [ -n "$MATCHES" ]; then log_warn "Debug '$pat' in: $MATCHES"; DEBUG_FOUND=1; fi
-done
-[ "$DEBUG_FOUND" -eq 0 ] && log_pass "No debug artifacts found"
-
-# CHECK 3: Conventional Commits
-log_info "Checking commit message format..."
-COMMIT_MSG_FILE=".git/COMMIT_EDITMSG"
-CC_PATTERN='^(feat|fix|docs|style|refactor|test|chore|ci|perf|build|revert)(\(.+\))?: .{1,100}$'
-if [ -f "$COMMIT_MSG_FILE" ]; then
-  MSG=$(head -1 "$COMMIT_MSG_FILE")
-  if echo "$MSG" | grep -qE "$CC_PATTERN"; then
-    log_pass "Commit message follows Conventional Commits"
-  else
-    log_fail "Bad commit message: '$MSG' (expected: 'type(scope): description')"
-  fi
-fi
-
-# CHECK 4: Run tests (auto-detect runner)
-log_info "Running test suite..."
-if command -v pytest &>/dev/null; then
-  pytest tests/unit/ -q --tb=short 2>&1 && log_pass "pytest passed" || log_fail "pytest FAILED"
-elif command -v npm &>/dev/null && [ -f package.json ]; then
-  npm test --silent 2>&1 && log_pass "npm test passed" || log_fail "npm test FAILED"
-elif command -v go &>/dev/null && [ -f go.mod ]; then
-  go test ./... 2>&1 && log_pass "go test passed" || log_fail "go test FAILED"
-else
-  log_warn "No recognized test runner — skipping tests"
-fi
-
-# CHECK 5: STATE.md consistency
-log_info "Checking STATE.md status..."
-CODE_CHANGES=$(echo "$STAGED_FILES" | grep -v '\.md$' | grep -v '^\.ai/' || true)
-if [ -n "$CODE_CHANGES" ] && [ -f STATE.md ]; then
-  grep -q 'Status.*IDLE' STATE.md 2>/dev/null \
-    && log_warn "STATE.md is IDLE but code changes detected — update your state" \
-    || log_pass "STATE.md status consistent"
-fi
-
 echo ""
-if [ "$ERRORS" -gt 0 ]; then
-  echo -e "${RED}BLOCKED: $ERRORS check(s) failed. Fix before committing.${NC}"; echo ""; exit 1
+echo "============================================="
+echo "  Running Pre-Commit Validation Gate"
+echo "============================================="
+echo ""
+
+# ---------------------------------------------------------------------------
+# CHECK 1: Secrets scan — block credential leakage
+# ---------------------------------------------------------------------------
+log_info "Checking for hardcoded secrets..."
+
+SECRET_PATTERNS=(
+  'password\s*=\s*["\x27][^"\x27]{4,}'
+  'api_key\s*=\s*["\x27][^"\x27]{8,}'
+  'secret\s*=\s*["\x27][^"\x27]{8,}'
+  'token\s*=\s*["\x27][^"\x27]{8,}'
+  'AWS_SECRET_ACCESS_KEY'
+  'PRIVATE_KEY'
+  'BEGIN RSA PRIVATE'
+  'BEGIN OPENSSH PRIVATE'
+)
+
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)
+
+for pattern in "${SECRET_PATTERNS[@]}"; do
+  if echo "$STAGED_FILES" | xargs -I{} git show ":{}"\
+     2>/dev/null | grep -qiE "$pattern" 2>/dev/null; then
+    log_fail "Potential secret detected matching pattern: '$pattern'"
+  fi
+done
+
+if [ "$ERRORS" -eq 0 ]; then
+  log_pass "No hardcoded secrets detected"
+fi
+
+# ---------------------------------------------------------------------------
+# CHECK 2: No debug artifacts left in staged files
+# ---------------------------------------------------------------------------
+log_info "Checking for debug artifacts..."
+
+DEBUG_PATTERNS=('console\.log\(' 'debugger;' 'binding\.pry' 'import pdb' 'pdb\.set_trace' 'TODO: REMOVE' 'FIXME: REMOVE')
+DEBUG_FOUND=0
+
+for pattern in "${DEBUG_PATTERNS[@]}"; do
+  MATCHES=$(echo "$STAGED_FILES" | xargs grep -lE "$pattern" 2>/dev/null || true)
+  if [ -n "$MATCHES" ]; then
+    log_warn "Debug artifact '$pattern' found in: $MATCHES"
+    DEBUG_FOUND=1
+  fi
+done
+
+if [ "$DEBUG_FOUND" -eq 0 ]; then
+  log_pass "No debug artifacts found"
+fi
+
+# ---------------------------------------------------------------------------
+# CHECK 3: Run test suite (if test runner is available)
+# ---------------------------------------------------------------------------
+log_info "Running test suite..."
+
+if command -v pytest &>/dev/null; then
+  if pytest tests/unit/ -q --tb=short 2>&1; then
+    log_pass "Python unit tests passed"
+  else
+    log_fail "Python unit tests FAILED — fix before committing"
+  fi
+elif command -v npm &>/dev/null && [ -f "package.json" ]; then
+  if npm test --silent 2>&1; then
+    log_pass "Node.js tests passed"
+  else
+    log_fail "Node.js tests FAILED — fix before committing"
+  fi
+elif command -v go &>/dev/null && [ -f "go.mod" ]; then
+  if go test ./... 2>&1; then
+    log_pass "Go tests passed"
+  else
+    log_fail "Go tests FAILED — fix before committing"
+  fi
 else
-  echo -e "${GREEN}All checks passed.${NC}"; echo ""; exit 0
+  log_warn "No recognized test runner found — skipping test check"
+fi
+
+# ---------------------------------------------------------------------------
+# CHECK 4: Docker build validation (if Dockerfile present)
+# ---------------------------------------------------------------------------
+log_info "Validating Dockerfile syntax..."
+
+if [ -f "Dockerfile" ]; then
+  if command -v docker &>/dev/null; then
+    if docker build --no-cache --quiet -t pre-commit-validate . &>/dev/null; then
+      log_pass "Docker build succeeded"
+      docker rmi pre-commit-validate &>/dev/null || true
+    else
+      log_fail "Docker build FAILED — check your Dockerfile"
+    fi
+  else
+    log_warn "Docker not available — skipping Docker build check"
+  fi
+else
+  log_warn "No Dockerfile found — skipping Docker check"
+fi
+
+# ---------------------------------------------------------------------------
+# CHECK 5: Validate STATE.md is not in IDLE when committing code changes
+# ---------------------------------------------------------------------------
+log_info "Checking STATE.md consistency..."
+
+CODE_CHANGES=$(echo "$STAGED_FILES" | grep -v '\.md$' | grep -v '^\.ai/' || true)
+
+if [ -n "$CODE_CHANGES" ] && [ -f "STATE.md" ]; then
+  if grep -q 'Status.*IDLE' STATE.md 2>/dev/null; then
+    log_warn "STATE.md shows IDLE but you are committing code changes. Update STATE.md status."
+  else
+    log_pass "STATE.md status is consistent with active development"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# RESULT
+# ---------------------------------------------------------------------------
+echo ""
+echo "============================================="
+if [ "$ERRORS" -gt 0 ]; then
+  echo -e "${RED}  BLOCKED: $ERRORS check(s) failed. Fix issues above.${NC}"
+  echo "============================================="
+  echo ""
+  exit 1
+else
+  echo -e "${GREEN}  All checks passed. Proceeding with commit.${NC}"
+  echo "============================================="
+  echo ""
+  exit 0
 fi
 HOOK_EOF
+
+cat > .git-hooks/commit-msg << 'COMMITMSG_EOF'
+#!/usr/bin/env bash
+# =============================================================================
+# Commit-Msg Hook — Validate Conventional Commits format
+# =============================================================================
+# Git passes the path to the file containing the commit message as $1.
+# This runs at commit time so we validate the message actually being committed.
+# Install: bash .git-hooks/install-hooks.sh
+# =============================================================================
+
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+COMMIT_MSG_FILE="${1:?}"
+CONVENTIONAL_PATTERN='^(feat|fix|docs|style|refactor|test|chore|ci|perf|build|revert)(\(.+\))?: .{1,100}$'
+
+COMMIT_MSG=$(head -1 "$COMMIT_MSG_FILE")
+if echo "$COMMIT_MSG" | grep -qE "$CONVENTIONAL_PATTERN"; then
+  exit 0
+fi
+
+echo -e "${RED}[FAIL]${NC} Commit message does not follow Conventional Commits format."
+echo "  Got:      '$COMMIT_MSG'"
+echo "  Expected: type(scope): description"
+echo "  Types:    feat|fix|docs|style|refactor|test|chore|ci|perf|build|revert"
+exit 1
+COMMITMSG_EOF
 
 cat > .git-hooks/install-hooks.sh << 'INSTALL_EOF'
 #!/usr/bin/env bash
@@ -458,8 +569,9 @@ done
 echo "Done. Run 'bash .git-hooks/pre-commit' to test."
 INSTALL_EOF
 
-chmod +x .git-hooks/pre-commit .git-hooks/install-hooks.sh
+chmod +x .git-hooks/pre-commit .git-hooks/commit-msg .git-hooks/install-hooks.sh
 ok ".git-hooks/pre-commit"
+ok ".git-hooks/commit-msg"
 ok ".git-hooks/install-hooks.sh"
 
 # =============================================================================
