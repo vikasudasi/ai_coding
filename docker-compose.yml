@@ -1,0 +1,106 @@
+# =============================================================================
+# docker-compose.yml — Multi-Service Orchestration
+# =============================================================================
+# Usage:
+#   docker-compose up --build         # Start all services
+#   docker-compose run --rm app bash  # Open a shell in the app container
+#   docker-compose run --rm app bash scripts/validate.sh  # Run validation
+#   docker-compose down -v            # Stop and remove volumes
+#
+# Agent instructions: Use the `app` service for all code execution and testing.
+# Never run tests directly on the host; always use docker-compose run.
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Application Service
+  # ---------------------------------------------------------------------------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: base          # Change to your final stage name if using multi-stage
+    image: project-app:local
+    container_name: project-app
+
+    # Mount source code for live development (remove in production builds)
+    volumes:
+      - .:/app
+      - /app/node_modules   # Prevent host node_modules from overriding container's
+
+    # Environment — use .env file for secrets (NEVER commit .env)
+    env_file:
+      - .env.example        # Provides defaults; override with a real .env locally
+    environment:
+      - NODE_ENV=development  # Replace with your runtime's env var convention
+      - APP_PORT=8080
+
+    ports:
+      - "8080:8080"
+
+    # Ensure dependent services are healthy before starting app
+    depends_on:
+      db:
+        condition: service_healthy
+
+    # Override CMD for development with a long-running process
+    # command: ["npm", "run", "dev"]  # Example
+
+    networks:
+      - app-network
+
+  # ---------------------------------------------------------------------------
+  # Database Service (placeholder — replace or remove as needed)
+  # ---------------------------------------------------------------------------
+  db:
+    image: postgres:16-alpine        # Replace with your DB image
+    container_name: project-db
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: appdb
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: apppassword  # Use secrets in production
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser -d appdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    networks:
+      - app-network
+
+  # ---------------------------------------------------------------------------
+  # Test Runner Service
+  # ---------------------------------------------------------------------------
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app
+    environment:
+      - NODE_ENV=test
+    command: ["bash", "scripts/validate.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - app-network
+    profiles:
+      - test   # Only runs with: docker-compose --profile test run test
+
+# =============================================================================
+# Volumes & Networks
+# =============================================================================
+volumes:
+  db-data:
+    driver: local
+
+networks:
+  app-network:
+    driver: bridge
